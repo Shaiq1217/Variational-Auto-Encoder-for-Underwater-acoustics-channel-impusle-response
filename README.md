@@ -19,8 +19,11 @@ This project uses real underwater acoustic channel data collected during a field
 This dataset provides a realistic basis for modeling and learning underwater acoustic channel behavior.
 
 ## Results
-CIRs sampled from VAE latent space 
+CIRs sampled from VAE latent space show that the salient features of the real CIRs are captured including the delay spread and some multipath propagation effects. The VAE does not capture the tail of the CIRs, which is expectedn because of ELBO loss function used for training. The loss function makes sure that the VAE reconstructions do not deviate too much from the norm of the prior distribution, which is a Gaussian distribution.
 ![recon](out/generated_cirs.png)
+
+Reconstruction of real CIRs from the dataset performs better. The MSE loss for the reconstruction is around 0.01, which is quite good considering the complexity of the CIRs and the noise in the data. Visual inspection of the reconstructed CIRs shows that the VAE is able to capture the main features of the CIRs.
+![recon_mse](out/cir_reconstruction_multiple.png)
 
 ## What's Next
 - Extending to conditional VAE (cVAE) environmental metadata from various sources (e.g., temperature, salinity, etc.)

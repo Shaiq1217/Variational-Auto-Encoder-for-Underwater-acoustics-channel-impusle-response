@@ -1,14 +1,14 @@
 from src.cir import save_reshaped_cir, plot_cir
-from src.dataloader import CIRDataloader
-from src.augment import CIRAugment
+from src.dataloader import load_data
 import glob
 import os
 import numpy as np
-from torch.utils.data import Dataset, DataLoader, random_split
 import matplotlib.pyplot as plt
 from src.model import ConvVAE
 from src.training import train_vae
 import torch
+from sklearn.decomposition import PCA
+from src.metrics import compute_mse, plot_multiple
 
 def preprocess_data():
     # Saving reshaped CIR
@@ -20,23 +20,6 @@ def preprocess_data():
     save_reshaped_cir(cir, out_file)
     print(f"[✓] Saved: {out_file}")
 
-def load_data(val_split = 0.15, batch_size = 8):
-  data_load = glob.glob(os.path.join("data", "cir", "*.npy"))
-  cir_data = np.concatenate([np.load(cir_name) for cir_name in data_load], axis = 0)
-    
-  print(f"[✓] Loaded {len(data_load)} CIR files. Shape: {cir_data.shape}")
-  dataset = CIRDataloader(cir_data)
-  val_size = int(len(dataset) * val_split)
-  train_size = len(dataset) - val_size
-
-  train_set = CIRDataloader(cir_data[:train_size], transform=CIRAugment())
-  val_set = CIRDataloader(cir_data[train_size:])
-  train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True)
-  val_loader = DataLoader(val_set, batch_size=batch_size, shuffle=False)
-  print(f"Train loader size: {len(train_loader)} batches")
-  print(f"Validation loader size: {len(val_loader)} batches")
-
-  return train_loader, val_loader
 
 def recon_from_original(loader, device, model):
   
@@ -82,27 +65,83 @@ def main():
   model.eval()  
 
   latent_dim = 32 
-  num_samples = 4  
+  num_samples = 187  
   z = torch.randn(num_samples, latent_dim).to(device)  
 
   with torch.no_grad():
     generated = model.decode(z) 
-  for idx, sample in enumerate(generated):
-    sample = sample.cpu().numpy()
-    sample = sample[0].flatten() + 1j * sample[1].flatten()
-    plt.subplot(2, 2, idx + 1)
-    plt.plot(np.abs(sample), label='Generated CIR')
-    plt.title(f"Generated CIR #{idx+1}")
-    plt.xlabel("Tap Index")
-    plt.ylabel("Amplitude")
+    generated = generated.cpu().numpy()
+    magnitudes = []
+
+    for sample in generated:
+        real = sample[0]
+        imag = sample[1]
+        mag = np.abs(real + 1j * imag)
+        
+        # Flatten each CIR into a 1D vector (optional: mean across one axis)
+        flat_mag = mag.flatten()  # shape: (2401,)
+        magnitudes.append(flat_mag)
+
+    # Stack into a 2D matrix: (num_samples x taps)
+    heatmap_data = np.stack(magnitudes) # shape: (180, 2401)
+
+    # Plot the global heatmap
+    plt.figure(figsize=(8, 6))
+    plt.imshow(heatmap_data ,cmap='viridis', aspect='auto', origin='lower')
+    plt.colorbar(label='Magnitude')
+    plt.xlabel("Sample index")
+    plt.ylabel("Block Index (Time)")
+    plt.title("Magnitude Heatmap of All Generated CIRs")
+    plt.savefig(os.path.join("out", "gen_cir_heatmap.png"))
+    plt.tight_layout()
+    plt.show()
+  
+
+def visualizetSNE():
+    train_loader, val_loader = load_data() 
+    device = 'cpu'
+
+    model = ConvVAE(latent_dim=32)
+    model.load_state_dict(torch.load(os.path.join("out", "best_vae_model.pth"), map_location=device))  
+    model.to(device)
+    model.eval()  
+
+    latent_vectors = []
+
+    with torch.no_grad():
+        for x_batch in val_loader:
+            x_batch = x_batch.to(device)
+            mu, logvar = model.encode(x_batch)
+            z = model.reparameterize(mu, logvar)
+            latent_vectors.append(z.cpu())
+    
+    z_all = torch.cat(latent_vectors, dim=0).numpy()
+
+    # Apply t-SNE
+    pca = PCA(n_components=2)
+    z_pca = pca.fit_transform(z_all)
+
+    # Plot
+    plt.figure(figsize=(8, 6))
+    plt.scatter(z_pca[:, 0], z_pca[:, 1], alpha=0.7, s=40, edgecolors='k')
+    plt.title("t-SNE of VAE Latent Space (Encoded CIRs)")
+    plt.xlabel("t-SNE dim 1")
+    plt.ylabel("t-SNE dim 2")
     plt.grid(True)
+    plt.tight_layout()
+    # plt.savefig(os.path.join("out", "tsne_latent_cir_nolabel.png"))
+    plt.show()
 
- 
-  plt.savefig(os.path.join("out", "generated_cirs.png"))
-  plt.tight_layout()
-  plt.show()
-
+def getMSE():
+  train_loader, val_loader = load_data() 
+  device = 'cpu'
+  model = ConvVAE(latent_dim=32)
+  model.load_state_dict(torch.load(os.path.join("out" , "best_vae_model.pth"), map_location=device))  
+  model.to(device)
+  model.eval()  
+  plot_multiple(model, val_loader, device=device, num_samples=4)
   
 
 if __name__ == "__main__":
-  main()
+  # visualizetSNE()
+  getMSE()
